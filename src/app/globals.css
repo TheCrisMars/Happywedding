@@ -1,0 +1,135 @@
+@import "tailwindcss";
+
+:root {
+  --background: #FAF6F0;
+  --foreground: #2C261D;
+  --gold-accent: #c5a059;
+  --gold-light: #f3e7c4;
+  --gold-dark: #896532;
+}
+
+@theme inline {
+  --font-sans: var(--font-montserrat), sans-serif;
+  --font-serif: var(--font-cinzel), serif;
+  --font-cursive: var(--font-pinyon), cursive;
+  --font-mono: var(--font-share-tech-mono), monospace;
+
+  --color-gold-50: #fbf8f0;
+  --color-gold-100: #f6ebd2;
+  --color-gold-200: #edd7a5;
+  --color-gold-300: #e3bd72;
+  --color-gold-400: #d7a448;
+  --color-gold-500: var(--gold-accent);
+  --color-gold-600: #a78243;
+  --color-gold-700: var(--gold-dark);
+  --color-gold-800: #6b4c23;
+  --color-gold-900: #503718;
+
+  --animate-pulse-soft: pulseSoft 2s infinite ease-in-out;
+  --animate-fade-in-up: fadeInUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes pulseSoft {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.03);
+    opacity: 0.9;
+  }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Custom Web Utilities */
+
+/* Elegant Watercolor & Marble Background */
+.bg-watercolor {
+  background-color: #FAF6F0;
+  background-image: 
+    radial-gradient(at 10% 20%, rgba(246, 235, 210, 0.5) 0px, transparent 50%),
+    radial-gradient(at 90% 10%, rgba(237, 215, 165, 0.4) 0px, transparent 50%),
+    radial-gradient(at 50% 80%, rgba(243, 231, 196, 0.5) 0px, transparent 50%),
+    radial-gradient(at 80% 90%, rgba(212, 175, 55, 0.15) 0px, transparent 40%);
+  background-attachment: fixed;
+}
+
+/* Gold Metallic Shimmer Gradient */
+.bg-gold-gradient {
+  background: linear-gradient(135deg, #c5a059 0%, #f5e4bc 30%, #c5a059 70%, #9a7638 100%);
+}
+
+.text-gold-gradient {
+  background: linear-gradient(135deg, #b99244 0%, #f6e6bf 50%, #9e782f 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Gold Foil Borders */
+.border-gold-foil {
+  border-image: linear-gradient(to right, #c5a059, #f3e7c4, #896532) 1;
+}
+
+/* Segmented LED Countdown style */
+.led-number {
+  font-family: var(--font-share-tech-mono), monospace;
+  letter-spacing: 0.05em;
+  background: linear-gradient(180deg, #b88d3e 0%, #ecd39a 50%, #875c1d 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 1px rgba(197, 160, 89, 0.2);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #FAF6F0;
+}
+::-webkit-scrollbar-thumb {
+  background: #c5a059;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #896532;
+}
+
+/* Decorative Gold Seal style */
+.wax-seal {
+  background: radial-gradient(circle at 35% 35%, #ffd97d 0%, #c5a059 60%, #896532 100%);
+  box-shadow: 
+    0 4px 10px rgba(0, 0, 0, 0.15),
+    inset 0 -4px 6px rgba(0,0,0,0.2),
+    inset 0 4px 6px rgba(255,255,255,0.4);
+}
+
+/* Diagonal cut image effect for Page 7 */
+.skew-card {
+  clip-path: polygon(15% 0%, 100% 0%, 85% 100%, 0% 100%);
+  transition: transform 0.5s ease;
+}
+.skew-card:hover {
+  transform: scale(1.05);
+}
+
+/* Invitation Container Frame */
+.invitation-container {
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100vh;
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.05);
+  position: relative;
+  background-color: #FAF6F0;
+  overflow-x: hidden;
+}
