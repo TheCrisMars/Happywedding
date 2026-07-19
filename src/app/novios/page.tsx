@@ -33,6 +33,11 @@ export default function NoviosPage() {
   const [isAutocompleteOpen, setIsAutocompleteOpen] = useState(false);
   const [autocompleteInput, setAutocompleteInput] = useState("");
 
+  // Admin RSVP manual editing states
+  const [editingRsvpGuest, setEditingRsvpGuest] = useState<Guest | null>(null);
+  const [editingAttending, setEditingAttending] = useState<boolean | null>(null);
+  const [editingCompanions, setEditingCompanions] = useState<number>(0);
+
   // Custom alert/confirm dialog states
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deleteConfirmName, setDeleteConfirmName] = useState<string>("");
@@ -350,7 +355,7 @@ export default function NoviosPage() {
               value={guestName}
               onChange={(e) => setGuestName(e.target.value)}
               placeholder="Ej: Tía María y Familia"
-              className="w-full px-3.5 py-2 border border-gold-200/40 rounded-xl text-xs font-sans bg-[#FAF6F0]/40 focus:outline-none focus:border-gold-500 h-9"
+              className="w-full px-3.5 py-2 border border-gray-200 rounded-md text-xs font-sans bg-white focus:outline-none focus:ring-1 focus:ring-gold-500 focus:border-gold-500 h-9 transition-colors text-gray-700 shadow-sm"
             />
           </div>
 
@@ -361,7 +366,7 @@ export default function NoviosPage() {
             <select
               value={companionLimit}
               onChange={(e) => setCompanionLimit(parseInt(e.target.value, 10))}
-              className="w-full px-3 py-2 border border-gold-200/40 rounded-xl text-xs font-sans bg-[#FAF6F0]/40 focus:outline-none focus:border-gold-500 cursor-pointer h-9 text-[#4E4739]"
+              className="w-full px-3 py-2 border border-gray-200 rounded-md text-xs font-sans bg-white focus:outline-none focus:ring-1 focus:ring-gold-500 focus:border-gold-500 cursor-pointer h-9 text-gray-700 transition-colors shadow-sm"
             >
               <option value="0">Pase Individual (Sin acompañantes)</option>
               {Array.from({ length: 10 }, (_, i) => (
@@ -374,7 +379,7 @@ export default function NoviosPage() {
 
           <button
             type="submit"
-            className="w-full md:w-52 bg-gradient-to-r from-gold-600 to-gold-500 text-white rounded-xl text-xs font-bold uppercase tracking-wider shadow hover:from-gold-700 hover:to-gold-600 transition-all duration-300 cursor-pointer h-9 flex items-center justify-center"
+            className="w-full md:w-52 bg-gold-600 hover:bg-gold-700 text-white rounded-md text-xs font-medium shadow transition-colors cursor-pointer h-9 flex items-center justify-center"
           >
             Generar Invitación
           </button>
@@ -566,6 +571,16 @@ export default function NoviosPage() {
                         <td className="py-3.5 text-right">
                           <div className="flex gap-2 justify-end">
                             <button
+                              onClick={() => {
+                                setEditingRsvpGuest(guest);
+                                setEditingAttending(guest.is_attending);
+                                setEditingCompanions(guest.confirmed_companions || 0);
+                              }}
+                              className="px-3 py-1.5 rounded-xl border border-gold-300/30 text-gold-700 hover:bg-gold-50 font-sans text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                            >
+                              Editar
+                            </button>
+                            <button
                               onClick={() => handleCopy(guestLink, guest.id)}
                               className={`px-3 py-1.5 rounded-xl font-sans text-[10px] font-bold uppercase tracking-wider transition-all border ${
                                 copiedId === guest.id
@@ -657,6 +672,16 @@ export default function NoviosPage() {
                         }) : "Sin respuesta"}
                       </span>
                       <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            setEditingRsvpGuest(guest);
+                            setEditingAttending(guest.is_attending);
+                            setEditingCompanions(guest.confirmed_companions || 0);
+                          }}
+                          className="px-2.5 py-1.5 rounded-xl bg-white border border-gold-300/30 text-gold-700 hover:bg-gold-50 font-sans text-[9px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                        >
+                          Confirmar
+                        </button>
                         <button
                           onClick={() => handleCopy(guestLink, guest.id)}
                           className={`px-2.5 py-1.5 rounded-xl font-sans text-[9px] font-bold uppercase tracking-wider transition-all border ${
@@ -837,6 +862,118 @@ export default function NoviosPage() {
                 className="px-4 py-2 bg-gold-600 hover:bg-gold-700 text-white rounded-xl text-xs font-sans font-bold uppercase tracking-wider transition-colors shadow-sm cursor-pointer"
               >
                 Aceptar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Manual RSVP Editing Modal */}
+      {editingRsvpGuest && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-gold-200/10 flex flex-col gap-4 animate-scale-up">
+            <div className="flex gap-3 items-start">
+              <div className="w-10 h-10 rounded-full bg-gold-50 flex items-center justify-center border border-gold-100 text-gold-600 flex-shrink-0">
+                <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current">
+                  <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h4 className="font-serif font-bold text-[#3D3526] text-sm uppercase tracking-wider text-left">
+                  Modificar Asistencia (RSVP)
+                </h4>
+                <p className="font-sans text-xs text-gray-500 mt-1.5 leading-relaxed text-left">
+                  Registra manualmente la respuesta para <strong className="text-gray-700">{editingRsvpGuest.name}</strong>.
+                </p>
+              </div>
+            </div>
+
+            {/* Attendance selector */}
+            <div className="flex flex-col gap-3 mt-1.5 text-left">
+              <div>
+                <label className="block text-[10px] uppercase tracking-wider text-gray-400 font-bold mb-1">
+                  Estado de Asistencia
+                </label>
+                <select
+                  value={editingAttending === null ? "pending" : editingAttending ? "attending" : "declined"}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === "pending") {
+                      setEditingAttending(null);
+                    } else if (val === "attending") {
+                      setEditingAttending(true);
+                    } else {
+                      setEditingAttending(false);
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-md text-xs font-sans bg-white hover:bg-gray-50/50 focus:outline-none focus:ring-1 focus:ring-gold-500 focus:border-gold-500 h-9 text-gray-700 shadow-sm cursor-pointer transition-colors"
+                >
+                  <option value="pending">Pendiente</option>
+                  <option value="attending">Confirmado (Sí Asistirá)</option>
+                  <option value="declined">Rechazado (No Asistirá)</option>
+                </select>
+              </div>
+
+              {/* Companion selector (only if confirmed attending and companion limit > 0) */}
+              {editingAttending === true && editingRsvpGuest.max_companions > 0 && (
+                <div className="animate-fade-in">
+                  <label className="block text-[10px] uppercase tracking-wider text-gray-400 font-bold mb-1">
+                    Número de Acompañantes Confirmados
+                  </label>
+                  <select
+                    value={editingCompanions}
+                    onChange={(e) => setEditingCompanions(parseInt(e.target.value, 10))}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-md text-xs font-sans bg-white hover:bg-gray-50/50 focus:outline-none focus:ring-1 focus:ring-gold-500 focus:border-gold-500 h-9 text-gray-700 shadow-sm cursor-pointer transition-colors"
+                  >
+                    {Array.from({ length: editingRsvpGuest.max_companions + 1 }, (_, i) => (
+                      <option key={i} value={i}>
+                        {i === 0 ? "Ningún acompañante (Irá solo/a)" : `${i} acompañante${i > 1 ? "s" : ""} adicional${i > 1 ? "es" : ""}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2.5 mt-2">
+              <button
+                onClick={() => setEditingRsvpGuest(null)}
+                className="px-4 py-2 border border-gray-200 text-gray-700 hover:bg-gray-100/80 rounded-md text-xs font-medium transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={async () => {
+                  const guest = editingRsvpGuest;
+                  const attending = editingAttending;
+                  const companions = attending === true ? editingCompanions : 0;
+                  setEditingRsvpGuest(null);
+                  try {
+                    const { error } = await supabase
+                      .from("guests")
+                      .update({
+                        is_attending: attending,
+                        confirmed_companions: companions,
+                        confirmed_at: attending !== null ? new Date().toISOString() : null
+                      })
+                      .eq("id", guest.id);
+
+                    if (error) {
+                      console.error("Error updating manual RSVP:", error);
+                      setCustomAlert({
+                        title: "Error al actualizar",
+                        message: "Hubo un problema al guardar la confirmación en la base de datos."
+                      });
+                    } else {
+                      fetchGuests();
+                    }
+                  } catch (err) {
+                    console.error("Failed to update guest manual RSVP:", err);
+                  }
+                }}
+                className="px-4 py-2 bg-gold-600 hover:bg-gold-700 text-white rounded-md text-xs font-medium transition-colors shadow-sm cursor-pointer"
+              >
+                Guardar Cambios
               </button>
             </div>
           </div>
