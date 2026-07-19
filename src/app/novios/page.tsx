@@ -25,6 +25,14 @@ export default function NoviosPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [errorState, setErrorState] = useState<string | null>(null);
 
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 25;
+
+  // Autocomplete states
+  const [isAutocompleteOpen, setIsAutocompleteOpen] = useState(false);
+  const [autocompleteInput, setAutocompleteInput] = useState("");
+
   // Custom alert/confirm dialog states
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deleteConfirmName, setDeleteConfirmName] = useState<string>("");
@@ -161,6 +169,41 @@ export default function NoviosPage() {
   const filteredGuests = guestsList.filter((guest) =>
     guest.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  // Pagination logic
+  const totalPages = Math.ceil(filteredGuests.length / itemsPerPage);
+  const indexOfLastGuest = currentPage * itemsPerPage;
+  const indexOfFirstGuest = indexOfLastGuest - itemsPerPage;
+  const currentGuests = filteredGuests.slice(indexOfFirstGuest, indexOfLastGuest);
+
+  // Helper to generate page numbers with ellipses (Shadcn style)
+  const getPageNumbers = () => {
+    const pages = [];
+    const maxVisiblePages = 5;
+    if (totalPages <= maxVisiblePages) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      pages.push(1);
+      let start = Math.max(2, currentPage - 1);
+      let end = Math.min(totalPages - 1, currentPage + 1);
+      if (currentPage <= 2) {
+        end = 4;
+      } else if (currentPage >= totalPages - 1) {
+        start = totalPages - 3;
+      }
+      if (start > 2) {
+        pages.push("ellipsis-1");
+      }
+      for (let i = start; i <= end; i++) {
+        pages.push(i);
+      }
+      if (end < totalPages - 1) {
+        pages.push("ellipsis-2");
+      }
+      pages.push(totalPages);
+    }
+    return pages;
+  };
 
   const downloadExcel = () => {
     // 1. Prepare data rows (without Fecha de Respuesta)
@@ -362,13 +405,93 @@ export default function NoviosPage() {
             </p>
           </div>
           
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Buscar por nombre..."
-            className="px-3 py-1.5 border border-gray-200 rounded-xl text-xs font-sans bg-gray-50 focus:outline-none focus:border-gold-500 w-full sm:max-w-[240px]"
-          />
+          <div className="relative w-full sm:w-64 z-30">
+            {/* Autocomplete Input */}
+            <div className="relative flex items-center w-full">
+              <input
+                type="text"
+                value={autocompleteInput}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setAutocompleteInput(val);
+                  setSearchTerm(val);
+                  setCurrentPage(1);
+                  setIsAutocompleteOpen(true);
+                }}
+                onFocus={() => setIsAutocompleteOpen(true)}
+                placeholder="Buscar invitado..."
+                className="px-3 py-1.5 pr-8 border border-gray-200 rounded-xl text-xs font-sans bg-[#FAF6F0]/40 focus:outline-none focus:border-gold-500 w-full h-8 text-[#4E4739]"
+              />
+              
+              {autocompleteInput && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAutocompleteInput("");
+                    setSearchTerm("");
+                    setCurrentPage(1);
+                    setIsAutocompleteOpen(false);
+                  }}
+                  className="absolute right-2.5 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
+                >
+                  <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-current">
+                    <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+                  </svg>
+                </button>
+              )}
+            </div>
+
+            {/* Suggestions Dropdown */}
+            {isAutocompleteOpen && (
+              <>
+                {/* Click-away overlay */}
+                <div className="fixed inset-0 z-20" onClick={() => setIsAutocompleteOpen(false)} />
+                
+                {/* Suggestions list popup */}
+                <div className="absolute top-full left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-white border border-gray-100 rounded-xl shadow-lg z-30 py-1 animate-fade-in divide-y divide-gray-50">
+                  {autocompleteInput && (
+                    <div
+                      onClick={() => {
+                        setAutocompleteInput("");
+                        setSearchTerm("");
+                        setCurrentPage(1);
+                        setIsAutocompleteOpen(false);
+                      }}
+                      className="px-3 py-2 text-[10px] font-sans text-gray-400 hover:bg-[#FAF6F0]/40 cursor-pointer font-bold uppercase tracking-wider transition-colors text-left"
+                    >
+                      Mostrar Todos
+                    </div>
+                  )}
+
+                  {/* Suggestion items */}
+                  {guestsList
+                    .filter((g) => g.name.toLowerCase().includes(autocompleteInput.toLowerCase()))
+                    .slice(0, 10)
+                    .map((guest) => (
+                      <div
+                        key={guest.id}
+                        onClick={() => {
+                          setAutocompleteInput(guest.name);
+                          setSearchTerm(guest.name);
+                          setCurrentPage(1);
+                          setIsAutocompleteOpen(false);
+                        }}
+                        className="px-3 py-2 text-xs font-sans text-gray-700 hover:bg-gold-50 hover:text-gold-900 cursor-pointer transition-colors text-left font-semibold"
+                      >
+                        {guest.name}
+                      </div>
+                    ))}
+
+                  {/* Empty Suggestions state */}
+                  {guestsList.filter((g) => g.name.toLowerCase().includes(autocompleteInput.toLowerCase())).length === 0 && (
+                    <div className="px-3 py-2 text-xs font-sans text-gray-400 text-center select-none">
+                      Sin resultados
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {loading ? (
@@ -382,20 +505,21 @@ export default function NoviosPage() {
         ) : (
           <>
             {/* Desktop Table View (hidden on mobile) */}
-            <div className="hidden md:block overflow-x-auto w-full">
+            <div className="hidden md:block overflow-x-auto w-full max-h-[600px] overflow-y-auto pr-1">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
-                <tr className="border-b border-gray-100 text-gray-400 font-serif uppercase tracking-wider text-[10px]">
-                  <th className="py-3 font-bold">Invitado</th>
-                  <th className="py-3 text-center font-bold">Pase Permitido</th>
-                  <th className="py-3 text-center font-bold">Respuesta</th>
-                  <th className="py-3 text-center font-bold">Acompañantes Confirmados</th>
-                  <th className="py-3 text-center font-bold">Total Asistentes</th>
-                  <th className="py-3 text-center font-bold">Confirmación</th>
+                <tr className="border-b border-gray-100 text-gray-400 font-serif uppercase tracking-wider text-[10px] sticky top-0 bg-white z-10">
+                  <th className="py-3 font-bold bg-white">Invitado</th>
+                  <th className="py-3 text-center font-bold bg-white">Pase Permitido</th>
+                  <th className="py-3 text-center font-bold bg-white">Respuesta</th>
+                  <th className="py-3 text-center font-bold bg-white">Acompañantes Confirmados</th>
+                  <th className="py-3 text-center font-bold bg-white">Total Asistentes</th>
+                  <th className="py-3 text-center font-bold bg-white">Confirmación</th>
+                  <th className="py-3 bg-white"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filteredGuests.map((guest) => {
+                {currentGuests.map((guest) => {
                   const guestLink = typeof window !== "undefined" ? `${window.location.origin}?id=${guest.id}` : "";
                   
                   return (
@@ -467,8 +591,8 @@ export default function NoviosPage() {
             </div>
 
             {/* Mobile Card List View (hidden on desktop) */}
-            <div className="block md:hidden space-y-3.5 w-full">
-              {filteredGuests.map((guest) => {
+            <div className="block md:hidden space-y-3.5 w-full max-h-[500px] overflow-y-auto pr-1">
+              {currentGuests.map((guest) => {
                 const guestLink = typeof window !== "undefined" ? `${window.location.origin}?id=${guest.id}` : "";
                 
                 return (
@@ -555,6 +679,75 @@ export default function NoviosPage() {
                 );
               })}
             </div>
+
+            {/* Shadcn-Style Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between border-t border-gray-100 pt-4 mt-2 px-2 gap-3">
+                <span className="text-[10px] font-sans text-gray-500">
+                  Mostrando {indexOfFirstGuest + 1}-{Math.min(indexOfLastGuest, filteredGuests.length)} de {filteredGuests.length} invitados
+                </span>
+                
+                <nav className="flex items-center gap-1" aria-label="Pagination">
+                  {/* Previous page button */}
+                  <button
+                    onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1}
+                    className={`inline-flex items-center justify-center gap-1 h-8 px-3 rounded-lg border text-[10px] font-sans font-bold uppercase tracking-wider transition-colors ${
+                      currentPage === 1
+                        ? "bg-transparent border-transparent text-gray-300 cursor-not-allowed"
+                        : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-gray-900 cursor-pointer"
+                    }`}
+                  >
+                    <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-current">
+                      <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
+                    </svg>
+                    <span>Anterior</span>
+                  </button>
+
+                  {/* Page index selectors */}
+                  {getPageNumbers().map((page, idx) => {
+                    if (page === "ellipsis-1" || page === "ellipsis-2") {
+                      return (
+                        <span key={`ellipsis-${idx}`} className="w-8 h-8 flex items-center justify-center text-gray-400 text-xs select-none">
+                          •••
+                        </span>
+                      );
+                    }
+                    
+                    const isPageActive = currentPage === page;
+                    return (
+                      <button
+                        key={`page-${page}`}
+                        onClick={() => setCurrentPage(page as number)}
+                        className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-sans font-bold transition-all border ${
+                          isPageActive
+                            ? "bg-gold-600 border-gold-600 text-white font-semibold"
+                            : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-gray-900 cursor-pointer"
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    );
+                  })}
+
+                  {/* Next page button */}
+                  <button
+                    onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                    disabled={currentPage === totalPages}
+                    className={`inline-flex items-center justify-center gap-1 h-8 px-3 rounded-lg border text-[10px] font-sans font-bold uppercase tracking-wider transition-colors ${
+                      currentPage === totalPages
+                        ? "bg-transparent border-transparent text-gray-300 cursor-not-allowed"
+                        : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-gray-900 cursor-pointer"
+                    }`}
+                  >
+                    <span>Siguiente</span>
+                    <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-current">
+                      <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z" />
+                    </svg>
+                  </button>
+                </nav>
+              </div>
+            )}
           </>
         )}
       </div>
