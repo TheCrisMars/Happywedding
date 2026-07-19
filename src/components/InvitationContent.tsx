@@ -11,6 +11,7 @@ import BackgroundMusic from "./BackgroundMusic";
 
 export default function InvitationContent() {
   const searchParams = useSearchParams();
+  const isPastDeadline = new Date() >= new Date("2026-07-23T00:00:00");
 
   // Local states for loaded guest data
   const [guestId, setGuestId] = useState<string | null>(null);
@@ -111,6 +112,10 @@ export default function InvitationContent() {
 
   const handleConfirm = async (e: React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
+    if (isPastDeadline) {
+      alert("El plazo para confirmar asistencia ha expirado.");
+      return;
+    }
     if (isAttending === null) return;
 
     setConfirming(true);
@@ -556,7 +561,29 @@ export default function InvitationContent() {
               Confirmación
             </h3>
 
-            {hasConfirmed ? (
+            {isPastDeadline && !hasConfirmed ? (
+              // Expired RSVP card
+              <div className="flex flex-col items-center gap-4 text-center py-4 w-full animate-fade-in-up">
+                {/* Expired icon */}
+                <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center border border-red-200 shadow-inner">
+                  <svg viewBox="0 0 24 24" className="w-7 h-7 fill-red-600">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v4z" />
+                  </svg>
+                </div>
+
+                <div>
+                  <h4 className="font-serif text-[#3D3526] text-xs tracking-[0.2em] font-semibold uppercase mb-0.5">
+                    {guestName || "Invitado"}
+                  </h4>
+                  <h3 className="font-cursive text-red-700 text-3xl leading-none my-2">
+                    Confirmación Finalizada
+                  </h3>
+                  <p className="font-sans text-[11px] text-[#7A7160] leading-relaxed max-w-[270px] mx-auto mt-2">
+                    El plazo de confirmación venció el <strong>Miércoles 22 de Julio de 2026</strong>. Tu inasistencia se ha registrado automáticamente.
+                  </p>
+                </div>
+              </div>
+            ) : hasConfirmed ? (
               // Beautiful Direct Success Screen (Direct on-page confirmation)
               <div className="flex flex-col items-center gap-4 text-center py-4 w-full animate-fade-in-up">
                 {/* Heart/Check icon */}
@@ -580,12 +607,14 @@ export default function InvitationContent() {
                   </p>
                 </div>
 
-                <button
-                  onClick={() => setHasConfirmed(false)}
-                  className="mt-2 text-[9px] font-sans font-bold text-gold-600 hover:text-gold-700 uppercase tracking-widest cursor-pointer border-b border-dashed border-gold-400"
-                >
-                  ¿Deseas modificar tu respuesta?
-                </button>
+                {!isPastDeadline && (
+                  <button
+                    onClick={() => setHasConfirmed(false)}
+                    className="mt-2 text-[9px] font-sans font-bold text-gold-600 hover:text-gold-700 uppercase tracking-widest cursor-pointer border-b border-dashed border-gold-400"
+                  >
+                    ¿Deseas modificar tu respuesta?
+                  </button>
+                )}
               </div>
             ) : (
               // RSVP Selection Form

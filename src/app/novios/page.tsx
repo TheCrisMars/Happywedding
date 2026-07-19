@@ -156,11 +156,18 @@ export default function NoviosPage() {
     setDeleteConfirmName(name);
   };
 
+  // Deadline check: July 22, 2026 at 23:59:59 (so starting July 23, 2026 at 00:00:00, deadline has passed)
+  const isPastDeadline = new Date() >= new Date("2026-07-23T00:00:00");
+
   // Calculate stats
   const totalInvitations = guestsList.length;
   const totalAttending = guestsList.filter((g) => g.is_attending === true).length;
-  const totalDeclined = guestsList.filter((g) => g.is_attending === false).length;
-  const totalPending = guestsList.filter((g) => g.is_attending === null).length;
+  const totalDeclined = guestsList.filter(
+    (g) => g.is_attending === false || (isPastDeadline && g.is_attending === null)
+  ).length;
+  const totalPending = isPastDeadline
+    ? 0
+    : guestsList.filter((g) => g.is_attending === null).length;
 
   // Sum: 1 (main guest) + companions confirmed, for all who confirmed attendance
   const totalConfirmedPeople = guestsList.reduce((acc, curr) => {
@@ -215,13 +222,15 @@ export default function NoviosPage() {
     const data = guestsList.map((guest) => ({
       "Invitado / Familia": guest.name,
       "Cupos Asignados (Pases)": guest.max_companions + 1,
-      "Estado Asistencia": guest.is_attending === null
-        ? "Pendiente"
-        : guest.is_attending
+      "Estado Asistencia": guest.is_attending === true
         ? "Confirmado (Asistirá)"
-        : "Rechazado (No Asistirá)",
+        : guest.is_attending === false
+        ? "Rechazado (No Asistirá)"
+        : isPastDeadline
+        ? "No Asistirá (Expirado)"
+        : "Pendiente",
       "Acompañantes Confirmados": guest.is_attending === true ? guest.confirmed_companions : 0,
-      "Total Asistentes": guest.is_attending === true ? guest.confirmed_companions + 1 : guest.is_attending === false ? 0 : 0
+      "Total Asistentes": guest.is_attending === true ? guest.confirmed_companions + 1 : 0
     }));
 
     // 2. Create worksheet from JSON
@@ -424,8 +433,8 @@ export default function NoviosPage() {
                   setIsAutocompleteOpen(true);
                 }}
                 onFocus={() => setIsAutocompleteOpen(true)}
-                placeholder="Buscar invitado..."
-                className="px-3 py-1.5 pr-8 border border-gray-200 rounded-xl text-xs font-sans bg-[#FAF6F0]/40 focus:outline-none focus:border-gold-500 w-full h-8 text-[#4E4739]"
+                placeholder="BUSCAR INVITADO..."
+                className="px-3 py-1.5 pr-8 border border-gray-200 rounded-md text-xs font-serif font-bold tracking-wider uppercase bg-white focus:outline-none focus:ring-1 focus:ring-gold-500 focus:border-gold-500 w-full h-8 text-[#3D3526] shadow-sm"
               />
               
               {autocompleteInput && (
@@ -462,7 +471,7 @@ export default function NoviosPage() {
                         setCurrentPage(1);
                         setIsAutocompleteOpen(false);
                       }}
-                      className="px-3 py-2 text-[10px] font-sans text-gray-400 hover:bg-[#FAF6F0]/40 cursor-pointer font-bold uppercase tracking-wider transition-colors text-left"
+                      className="px-3 py-2 text-[10px] font-serif font-bold uppercase tracking-wider text-gray-400 hover:bg-[#FAF6F0]/40 cursor-pointer transition-colors text-left"
                     >
                       Mostrar Todos
                     </div>
@@ -481,7 +490,7 @@ export default function NoviosPage() {
                           setCurrentPage(1);
                           setIsAutocompleteOpen(false);
                         }}
-                        className="px-3 py-2 text-xs font-sans text-gray-700 hover:bg-gold-50 hover:text-gold-900 cursor-pointer transition-colors text-left font-semibold"
+                        className="px-3 py-2 text-xs font-serif font-bold tracking-wider uppercase text-[#3D3526] hover:bg-gold-50 hover:text-gold-900 cursor-pointer transition-colors text-left border-l-2 border-transparent hover:border-gold-500"
                       >
                         {guest.name}
                       </div>
@@ -538,9 +547,14 @@ export default function NoviosPage() {
                         {guest.max_companions === 0 ? "Individual" : `Individual + ${guest.max_companions} Acomp.`}
                       </td>
                       <td className="py-3.5 text-center">
-                        {guest.is_attending === null && (
+                        {guest.is_attending === null && !isPastDeadline && (
                           <span className="inline-block px-2.5 py-1 text-[10px] font-sans font-bold text-yellow-700 bg-yellow-50 border border-yellow-200/50 rounded-full">
                             Pendiente
+                          </span>
+                        )}
+                        {guest.is_attending === null && isPastDeadline && (
+                          <span className="inline-block px-2.5 py-1 text-[10px] font-sans font-bold text-red-700 bg-red-50 border border-red-200/50 rounded-full">
+                            No Asistirá (Expirado)
                           </span>
                         )}
                         {guest.is_attending === true && (
@@ -555,10 +569,10 @@ export default function NoviosPage() {
                         )}
                       </td>
                       <td className="py-3.5 text-center text-gray-500 font-sans font-semibold">
-                        {guest.is_attending === true ? `${guest.confirmed_companions} acompañante(s)` : guest.is_attending === false ? 0 : "-"}
+                        {guest.is_attending === true ? `${guest.confirmed_companions} acompañante(s)` : guest.is_attending === false || isPastDeadline ? 0 : "-"}
                       </td>
                       <td className="py-3.5 text-center text-[#3D3526] font-sans font-bold text-sm">
-                        {guest.is_attending === true ? guest.confirmed_companions + 1 : guest.is_attending === false ? 0 : "-"}
+                        {guest.is_attending === true ? guest.confirmed_companions + 1 : guest.is_attending === false || isPastDeadline ? 0 : "-"}
                       </td>
                       <td className="py-3.5 text-center text-gray-400 font-sans text-[10px]">
                         {guest.confirmed_at ? new Date(guest.confirmed_at).toLocaleDateString("es-ES", {
@@ -619,23 +633,28 @@ export default function NoviosPage() {
                     <div className="flex justify-between items-start gap-2">
                       <div className="font-serif font-bold text-[#3D3526] text-sm leading-snug">
                         {guest.name}
-                      </div>
-                      <div>
-                        {guest.is_attending === null && (
-                          <span className="inline-block px-2 py-0.5 text-[9px] font-sans font-bold text-yellow-700 bg-yellow-50 border border-yellow-200/30 rounded-full">
-                            Pendiente
-                          </span>
-                        )}
-                        {guest.is_attending === true && (
-                          <span className="inline-block px-2.5 py-0.5 text-[9px] font-sans font-bold text-green-700 bg-green-50 border border-green-200/30 rounded-full">
-                            Confirmado
-                          </span>
-                        )}
-                        {guest.is_attending === false && (
-                          <span className="inline-block px-2.5 py-0.5 text-[9px] font-sans font-bold text-red-700 bg-red-50 border border-red-200/30 rounded-full">
-                            Rechazado
-                          </span>
-                        )}
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {guest.is_attending === null && !isPastDeadline && (
+                            <span className="inline-block px-2.5 py-0.5 text-[9px] font-sans font-bold text-yellow-700 bg-yellow-50 border border-yellow-200/30 rounded-full">
+                              Pendiente
+                            </span>
+                          )}
+                          {guest.is_attending === null && isPastDeadline && (
+                            <span className="inline-block px-2.5 py-0.5 text-[9px] font-sans font-bold text-red-700 bg-red-50 border border-red-200/30 rounded-full">
+                              No Asistirá (Expirado)
+                            </span>
+                          )}
+                          {guest.is_attending === true && (
+                            <span className="inline-block px-2.5 py-0.5 text-[9px] font-sans font-bold text-green-700 bg-green-50 border border-green-200/30 rounded-full">
+                              Confirmado
+                            </span>
+                          )}
+                          {guest.is_attending === false && (
+                            <span className="inline-block px-2.5 py-0.5 text-[9px] font-sans font-bold text-red-700 bg-red-50 border border-red-200/30 rounded-full">
+                              Rechazado
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -650,13 +669,13 @@ export default function NoviosPage() {
                       <div>
                         <span className="block text-[8px] uppercase tracking-wider text-gray-400 font-bold mb-0.5">Acompañantes</span>
                         <span className="text-[#3D3526] font-semibold">
-                          {guest.is_attending === true ? guest.confirmed_companions : guest.is_attending === false ? 0 : "-"}
+                          {guest.is_attending === true ? guest.confirmed_companions : guest.is_attending === false || isPastDeadline ? 0 : "-"}
                         </span>
                       </div>
                       <div>
                         <span className="block text-[8px] uppercase tracking-wider text-gray-400 font-bold mb-0.5">Total Asistirán</span>
                         <span className="text-gold-700 font-bold">
-                          {guest.is_attending === true ? guest.confirmed_companions + 1 : guest.is_attending === false ? 0 : "-"}
+                          {guest.is_attending === true ? guest.confirmed_companions + 1 : guest.is_attending === false || isPastDeadline ? 0 : "-"}
                         </span>
                       </div>
                     </div>
