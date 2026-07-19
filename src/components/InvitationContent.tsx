@@ -1,43 +1,195 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { supabase } from "@/utils/supabase";
 import Countdown from "./Countdown";
 import Timeline from "./Timeline";
 import Carousel from "./Carousel";
+import BackgroundMusic from "./BackgroundMusic";
 
 export default function InvitationContent() {
   const searchParams = useSearchParams();
 
-  // Read name parameter from URL (e.g. ?to=Juan+Perez)
-  const guestName = searchParams.get("to") || searchParams.get("name") || searchParams.get("invitado") || "";
-
-  // Companion Limit Parameter
-  const companionLimit = Math.max(0, parseInt(searchParams.get("limit") || "0", 10));
+  // Local states for loaded guest data
+  const [guestId, setGuestId] = useState<string | null>(null);
+  const [guestName, setGuestName] = useState("");
+  const [companionLimit, setCompanionLimit] = useState(0);
   const [companionsCount, setCompanionsCount] = useState(0);
+
+  // Attendance states
+  const [isAttending, setIsAttending] = useState<boolean | null>(null); // null = pending, true = yes, false = no
+  const [dbLoading, setDbLoading] = useState(true);
+  const [hasConfirmed, setHasConfirmed] = useState(false);
+  const [isDeleted, setIsDeleted] = useState(false);
+
+  useEffect(() => {
+    const id = searchParams.get("id");
+    if (id) {
+      setGuestId(id);
+      fetchGuestFromDb(id);
+    } else {
+      // Fallback to URL search parameters for static links
+      const name = searchParams.get("to") || searchParams.get("name") || searchParams.get("invitado") || "";
+      const limit = Math.max(0, parseInt(searchParams.get("limit") || "0", 10));
+      setGuestName(name);
+      setCompanionLimit(limit);
+      setDbLoading(false);
+    }
+  }, [searchParams]);
+
+  const fetchGuestFromDb = async (id: string) => {
+    setDbLoading(true);
+    setIsDeleted(false);
+    try {
+      const { data, error } = await supabase
+        .from("guests")
+        .select("*")
+        .eq("id", id)
+        .single();
+
+      if (error) {
+        console.error("Error loading guest details:", error);
+        if (error.code === "PGRST116") {
+          setIsDeleted(true);
+        } else {
+          // General connection error fallback to query params
+          const name = searchParams.get("to") || searchParams.get("name") || searchParams.get("invitado") || "";
+          const limit = Math.max(0, parseInt(searchParams.get("limit") || "0", 10));
+          if (name) {
+            setGuestName(name);
+            setCompanionLimit(limit);
+          } else {
+            setIsDeleted(true);
+          }
+        }
+      } else if (data) {
+        setGuestName(data.name);
+        setCompanionLimit(data.max_companions);
+        if (data.is_attending !== null) {
+          setIsAttending(data.is_attending);
+          setCompanionsCount(data.confirmed_companions || 0);
+          setHasConfirmed(true);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load guest data:", e);
+      setIsDeleted(true);
+    } finally {
+      setDbLoading(false);
+    }
+  };
 
   // WhatsApp confirmation pre-filled message
   const getWhatsAppUrl = () => {
     const defaultNum = "593987654321"; // Editable phone number
     let message = "";
     if (guestName) {
-      if (companionLimit > 0) {
-        if (companionsCount === 0) {
-          message = `Hola! Confirmo mi asistencia a la boda de José Andrés y Daviushka. Soy ${guestName.trim()} e iré solo/a (total: 1 persona).`;
+      if (isAttending === true) {
+        if (companionLimit > 0) {
+          if (companionsCount === 0) {
+            message = `Hola! Confirmo mi asistencia a la boda de José Andrés y Daviushka. Soy ${guestName.trim()} e iré solo/a (total: 1 persona).`;
+          } else {
+            message = `Hola! Confirmo mi asistencia a la boda de José Andrés y Daviushka. Soy ${guestName.trim()} e iré con ${companionsCount} acompañante(s) (total: ${companionsCount + 1} personas).`;
+          }
         } else {
-          message = `Hola! Confirmo mi asistencia a la boda de José Andrés y Daviushka. Soy ${guestName.trim()} e iré con ${companionsCount} acompañante(s) (total: ${companionsCount + 1} personas).`;
+          message = `Hola! Confirmo mi asistencia a la boda de José Andrés y Daviushka. Soy ${guestName.trim()} (total: 1 persona).`;
         }
+      } else if (isAttending === false) {
+        message = `Hola! Agradezco mucho la invitación, pero lamentablemente no podré asistir a la boda de José Andrés y Daviushka. Les deseo todo lo mejor.`;
       } else {
-        message = `Hola! Confirmo mi asistencia a la boda de José Andrés y Daviushka. Soy ${guestName.trim()}.`;
+        message = `Hola! Quería ponerme en contacto por la boda de José Andrés y Daviushka. Soy ${guestName.trim()}.`;
       }
     } else {
-      message = `Hola! Confirmo mi asistencia a la boda de José Andrés y Daviushka.`;
+      message = `Hola! Quería ponerme en contacto por la boda de José Andrés y Daviushka.`;
     }
     return `https://wa.me/${defaultNum}?text=${encodeURIComponent(message)}`;
   };
 
+  const [confirming, setConfirming] = useState(false);
+
+  const handleConfirm = async (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    if (isAttending === null) return;
+
+    setConfirming(true);
+    try {
+      if (guestId) {
+        // Update existing guest record in Supabase
+        const { error } = await supabase
+          .from("guests")
+          .update({
+            is_attending: isAttending,
+            confirmed_companions: isAttending === true ? companionsCount : 0,
+            confirmed_at: new Date().toISOString()
+          })
+          .eq("id", guestId);
+
+        if (error) {
+          console.error("Error updating RSVP status:", error);
+          alert("Hubo un problema al guardar tu confirmación en la base de datos.");
+        } else {
+          setHasConfirmed(true);
+        }
+      } else {
+        // Insert new guest record (for static fallback links without pre-registration)
+        const { error } = await supabase
+          .from("guests")
+          .insert([
+            {
+              name: guestName || "Invitado sin nombre",
+              max_companions: companionLimit,
+              is_attending: isAttending,
+              confirmed_companions: isAttending === true ? companionsCount : 0,
+              confirmed_at: new Date().toISOString()
+            }
+          ]);
+
+        if (error) {
+          console.error("Error inserting RSVP status:", error);
+          alert("Hubo un problema al guardar tu confirmación en la base de datos.");
+        } else {
+          setHasConfirmed(true);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to confirm attendance:", err);
+      alert("Error al conectar con la base de datos.");
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  if (isDeleted) {
+    return (
+      <div className="w-full min-h-screen flex items-center justify-center p-4 bg-[#FAF6F0]">
+        <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-lg border border-gold-200/20 text-center flex flex-col items-center gap-5 animate-scale-up">
+          <div className="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center border border-red-100 text-red-600 animate-pulse-soft">
+            <svg viewBox="0 0 24 24" className="w-8 h-8 fill-current">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" />
+            </svg>
+          </div>
+
+          <div>
+            <h3 className="font-serif text-[#3D3526] text-xl font-bold tracking-wider uppercase mb-1.5 text-center">
+              Invitación Inactiva
+            </h3>
+            <p className="font-cursive text-gold-700 text-3xl leading-none my-2 text-center">
+              Lo Sentimos
+            </p>
+            <p className="font-sans text-xs text-gray-500 leading-relaxed mt-3 max-w-[280px] mx-auto text-center">
+              Esta invitación ha sido desactivada o eliminada. Si crees que se trata de un error, por favor ponte en contacto con los novios.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="w-full min-h-screen py-4 md:py-8 px-4 md:px-6 lg:px-12 flex flex-col items-center">
+    <>
+      <div className="animate-fade-in-up w-full min-h-screen py-4 md:py-8 px-4 md:px-6 lg:px-12 flex flex-col items-center">
       {/* Seamless Wide Container with Tight Spacing */}
       <div className="w-full max-w-5xl flex flex-col gap-6 md:gap-8">
 
@@ -404,50 +556,125 @@ export default function InvitationContent() {
               Confirmación
             </h3>
 
-            {/* Personalized RSVP Text & Companion Info */}
-            <div className="font-sans text-sm md:text-base text-[#4E4739] leading-relaxed mb-3 max-w-[280px] flex flex-col items-center gap-2">
-              <p>
-                {guestName ? (
-                  <>Agradecemos que confirmes tu asistencia, <strong className="text-[#3D3526]">{guestName}</strong>, hasta el Miércoles 22 de Julio.</>
-                ) : (
-                  "Agradecemos que confirmes tu asistencia hasta el Miércoles 22 de Julio."
-                )}
-              </p>
-              {guestName && (
-                <span className="text-[11px] font-semibold text-gold-700 uppercase tracking-wider bg-gold-50 px-2.5 py-0.5 rounded-full border border-gold-300/20">
-                  {companionLimit > 0 ? `Pase para ti y hasta ${companionLimit} acompañante(s)` : "Pase Individual (1 Persona)"}
-                </span>
-              )}
-            </div>
+            {hasConfirmed ? (
+              // Beautiful Direct Success Screen (Direct on-page confirmation)
+              <div className="flex flex-col items-center gap-4 text-center py-4 w-full animate-fade-in-up">
+                {/* Heart/Check icon */}
+                <div className="w-16 h-16 rounded-full bg-gold-50 flex items-center justify-center border border-gold-200 shadow-inner animate-pulse-soft">
+                  <svg viewBox="0 0 24 24" className="w-8 h-8 fill-gold-600">
+                    <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                  </svg>
+                </div>
 
-            {/* Companion Select Dropdown */}
-            {guestName && companionLimit > 0 && (
-              <div className="flex flex-col items-center gap-1.5 w-full max-w-[240px] mb-3.5 animate-fade-in-up">
-                <label className="font-serif text-[10px] text-[#7A7160] uppercase font-bold tracking-widest leading-none">
-                  ¿Con cuántos acompañantes asistirás?
-                </label>
-                <select
-                  value={companionsCount}
-                  onChange={(e) => setCompanionsCount(parseInt(e.target.value, 10))}
-                  className="w-full px-3 py-1.5 border border-gold-300/40 rounded-xl text-xs font-sans bg-white focus:outline-none focus:border-gold-500 text-[#4E4739] text-center cursor-pointer shadow-sm"
+                <div>
+                  <h4 className="font-serif text-[#3D3526] text-xs tracking-[0.2em] font-semibold uppercase mb-0.5">
+                    {guestName || "¡Muchas Gracias!"}
+                  </h4>
+                  <h3 className="font-cursive text-gold-700 text-3xl leading-none my-2">
+                    {isAttending ? "¡Nos vemos en la boda!" : "Confirmación Recibida"}
+                  </h3>
+                  <p className="font-sans text-xs text-[#7A7160] leading-relaxed max-w-[260px] mx-auto mt-2">
+                    {isAttending
+                      ? `Tu respuesta ha sido guardada en la base de datos. Esperamos compartir este día contigo el 7 de Agosto del 2026.`
+                      : `Lamentamos mucho que no puedas asistir. Tu respuesta ha sido guardada en nuestra lista de invitados.`}
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => setHasConfirmed(false)}
+                  className="mt-2 text-[9px] font-sans font-bold text-gold-600 hover:text-gold-700 uppercase tracking-widest cursor-pointer border-b border-dashed border-gold-400"
                 >
-                  {Array.from({ length: companionLimit + 1 }, (_, i) => (
-                    <option key={i} value={i}>
-                      {i === 0 ? "Ninguno (asisto solo/a)" : `${i} acompañante${i > 1 ? "s" : ""}`}
-                    </option>
-                  ))}
-                </select>
+                  ¿Deseas modificar tu respuesta?
+                </button>
               </div>
-            )}
+            ) : (
+              // RSVP Selection Form
+              <>
+                {/* Personalized RSVP Text & Companion Info */}
+                <div className="font-sans text-sm md:text-base text-[#4E4739] leading-relaxed mb-3 max-w-[280px] flex flex-col items-center gap-2">
+                  <p>
+                    {guestName ? (
+                      <>Agradecemos que confirmes tu asistencia, <strong className="text-[#3D3526]">{guestName}</strong>, hasta el Miércoles 22 de Julio.</>
+                    ) : (
+                      "Agradecemos que confirmes tu asistencia hasta el Miércoles 22 de Julio."
+                    )}
+                  </p>
+                  {guestName && (
+                    <span className="text-[11px] font-semibold text-gold-700 uppercase tracking-wider bg-gold-50 px-2.5 py-0.5 rounded-full border border-gold-300/20">
+                      {companionLimit > 0 ? `Pase para ti y hasta ${companionLimit} acompañante(s)` : "Pase Individual (1 Persona)"}
+                    </span>
+                  )}
+                </div>
 
-            <a
-              href={getWhatsAppUrl()}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full max-w-[280px] py-3 bg-gradient-to-r from-gold-600 to-gold-500 text-white rounded-lg text-xs md:text-sm font-bold uppercase tracking-[0.15em] shadow-md hover:from-gold-700 hover:to-gold-600 transition-all duration-300 transform active:scale-[0.98] animate-[pulseSoft_3s_infinite]"
-            >
-              Confirmar aquí
-            </a>
+                {/* Combined Attendance & Companion Dropdown */}
+                {guestName && (
+                  <div className="flex flex-col items-center gap-1.5 w-full max-w-[280px] mb-3.5 animate-fade-in-up">
+                    <label className="font-serif text-[10px] text-[#7A7160] uppercase font-bold tracking-widest leading-none">
+                      ¿Cómo confirmarás tu asistencia?
+                    </label>
+                    <select
+                      value={
+                        isAttending === null
+                          ? ""
+                          : isAttending === false
+                            ? "no"
+                            : `yes_${companionsCount}`
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === "") {
+                          setIsAttending(null);
+                          setCompanionsCount(0);
+                        } else if (val === "no") {
+                          setIsAttending(false);
+                          setCompanionsCount(0);
+                        } else if (val.startsWith("yes_")) {
+                          setIsAttending(true);
+                          const count = parseInt(val.replace("yes_", ""), 10);
+                          setCompanionsCount(count);
+                        }
+                      }}
+                      className="w-full px-3.5 py-2 border border-gold-300/40 rounded-xl text-xs font-sans bg-white focus:outline-none focus:border-gold-500 text-[#4E4739] text-center cursor-pointer shadow-sm focus:ring-1 focus:ring-gold-500"
+                    >
+                      <option value="">Elige una opción...</option>
+
+                      {companionLimit === 0 ? (
+                        // Individual pass
+                        <>
+                          <option value="yes_0">Sí, asistiré</option>
+                        </>
+                      ) : (
+                        // Pass with companions
+                        <>
+                          <option value="yes_0">Sí, asistiré solo/a</option>
+                          {Array.from({ length: companionLimit }, (_, i) => {
+                            const count = i + 1;
+                            return (
+                              <option key={count} value={`yes_${count}`}>
+                                Sí, asistiré con {count} acompañante{count > 1 ? "s" : ""}
+                              </option>
+                            );
+                          })}
+                        </>
+                      )}
+
+                      <option value="no">No podré asistir</option>
+                    </select>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleConfirm}
+                  disabled={isAttending === null || confirming}
+                  className={`w-full max-w-[280px] py-3 text-center text-white rounded-lg text-xs md:text-sm font-bold uppercase tracking-[0.15em] shadow-md transition-all duration-300 transform active:scale-[0.98] ${isAttending === null || confirming
+                    ? "bg-gray-300 cursor-not-allowed opacity-70 pointer-events-none"
+                    : "bg-gradient-to-r from-gold-600 to-gold-500 hover:from-gold-700 hover:to-gold-600 animate-[pulseSoft_3s_infinite] cursor-pointer"
+                    }`}
+                >
+                  {confirming ? "Guardando..." : "Confirmar asistencia"}
+                </button>
+              </>
+            )}
 
             <span className="font-serif text-[#3D3526] text-[18px] font-bold tracking-[0.2em] uppercase mt-3">
               INVITACIÓN NO TRANSFERIBLE
@@ -520,9 +747,9 @@ export default function InvitationContent() {
           <Carousel />
         </section>
 
-
-
       </div>
-    </div>
+      </div>
+      <BackgroundMusic />
+    </>
   );
 }

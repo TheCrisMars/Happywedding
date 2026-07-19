@@ -2,71 +2,134 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import * as XLSX from "xlsx";
+import { supabase } from "@/utils/supabase";
 
-interface GeneratedGuest {
+interface Guest {
   id: string;
   name: string;
-  limit: number;
-  url: string;
-  timestamp: string;
+  max_companions: number;
+  confirmed_companions: number;
+  is_attending: boolean | null; // null = pending, true = attending, false = declined
+  confirmed_at: string | null;
+  created_at: string;
 }
 
 export default function NoviosPage() {
   const [guestName, setGuestName] = useState("");
   const [companionLimit, setCompanionLimit] = useState(0);
-  const [history, setHistory] = useState<GeneratedGuest[]>([]);
+  const [guestsList, setGuestsList] = useState<Guest[]>([]);
+  const [loading, setLoading] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [justGenerated, setJustGenerated] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [errorState, setErrorState] = useState<string | null>(null);
 
-  // Load history from localStorage on mount
+  // Custom alert/confirm dialog states
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState<string>("");
+  const [customAlert, setCustomAlert] = useState<{ message: string; title?: string } | null>(null);
+
+  // Load guests from Supabase on mount and subscribe to realtime changes
   useEffect(() => {
-    const saved = localStorage.getItem("wedding_guest_links");
-    if (saved) {
-      try {
-        setHistory(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to parse guest links history", e);
-      }
-    }
+    fetchGuests();
+
+    // Subscribe to realtime database changes on the 'guests' table
+    const channel = supabase
+      .channel("guests-realtime-changes")
+      .on(
+        "postgres_changes",
+        {
+          event: "*", // Listen to INSERT, UPDATE, DELETE
+          schema: "public",
+          table: "guests"
+        },
+        () => {
+          fetchGuests(); // Refresh table and stats automatically
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
-  const saveHistory = (newHistory: GeneratedGuest[]) => {
-    setHistory(newHistory);
-    localStorage.setItem("wedding_guest_links", JSON.stringify(newHistory));
+  const fetchGuests = async () => {
+    setLoading(true);
+    setErrorState(null);
+    try {
+      const { data, error } = await supabase
+        .from("guests")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.error("Error fetching guests:", error);
+        setErrorState(error.message || "Error al conectar con Supabase");
+      } else if (data) {
+        setGuestsList(data);
+      }
+    } catch (e: any) {
+      console.error("Failed to load guests:", e);
+      setErrorState(e.message || "No se pudo conectar a la base de datos de Supabase.");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleGenerate = (e: React.FormEvent) => {
+  const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!guestName.trim()) return;
 
-    const origin = typeof window !== "undefined" ? window.location.origin : "";
-    const encodedName = encodeURIComponent(guestName.trim());
-    const generatedUrl = `${origin}?to=${encodedName}&limit=${companionLimit}`;
+    try {
+      // Insert new guest into Supabase
+      const { data, error } = await supabase
+        .from("guests")
+        .insert([
+          {
+            name: guestName.trim(),
+            max_companions: companionLimit,
+            is_attending: null, // Starts as pending
+            confirmed_companions: 0
+          }
+        ])
+        .select()
+        .single();
 
-    const newGuest: GeneratedGuest = {
-      id: Math.random().toString(36).substr(2, 9),
-      name: guestName.trim(),
-      limit: companionLimit,
-      url: generatedUrl,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
+      if (error) {
+        console.error("Error creating guest in Supabase:", error);
+        setCustomAlert({
+          title: "Error al guardar",
+          message: "Hubo un problema al registrar la invitación en la base de datos."
+        });
+        return;
+      }
 
-    const updatedHistory = [newGuest, ...history];
-    saveHistory(updatedHistory);
+      if (data) {
+        const origin = typeof window !== "undefined" ? window.location.origin : "";
+        const generatedUrl = `${origin}?id=${data.id}`;
 
-    // Auto-copy generated URL to clipboard
-    navigator.clipboard.writeText(generatedUrl);
-    setJustGenerated(generatedUrl);
-    setCopiedId(newGuest.id);
-    
-    // Reset form inputs
-    setGuestName("");
-    setCompanionLimit(0);
+        // Auto-copy generated URL to clipboard
+        navigator.clipboard.writeText(generatedUrl);
+        setJustGenerated(generatedUrl);
+        setCopiedId(data.id);
+        
+        // Reset form inputs
+        setGuestName("");
+        setCompanionLimit(0);
 
-    setTimeout(() => {
-      setCopiedId(null);
-      setJustGenerated(null);
-    }, 3000);
+        // Refresh list
+        fetchGuests();
+
+        setTimeout(() => {
+          setCopiedId(null);
+          setJustGenerated(null);
+        }, 4000);
+      }
+    } catch (err) {
+      console.error("Failed to handle generate link:", err);
+    }
   };
 
   const handleCopy = (url: string, id: string) => {
@@ -75,178 +138,517 @@ export default function NoviosPage() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleDelete = (id: string) => {
-    const updated = history.filter(item => item.id !== id);
-    saveHistory(updated);
+  const triggerDeleteConfirm = (id: string, name: string) => {
+    setDeleteConfirmId(id);
+    setDeleteConfirmName(name);
   };
 
-  const handleClearHistory = () => {
-    if (window.confirm("¿Estás seguro de que deseas borrar todo el historial de enlaces?")) {
-      saveHistory([]);
+  // Calculate stats
+  const totalInvitations = guestsList.length;
+  const totalAttending = guestsList.filter((g) => g.is_attending === true).length;
+  const totalDeclined = guestsList.filter((g) => g.is_attending === false).length;
+  const totalPending = guestsList.filter((g) => g.is_attending === null).length;
+
+  // Sum: 1 (main guest) + companions confirmed, for all who confirmed attendance
+  const totalConfirmedPeople = guestsList.reduce((acc, curr) => {
+    if (curr.is_attending === true) {
+      return acc + 1 + (curr.confirmed_companions || 0);
     }
+    return acc;
+  }, 0);
+
+  // Filter list by search term
+  const filteredGuests = guestsList.filter((guest) =>
+    guest.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const downloadExcel = () => {
+    // 1. Prepare data rows (without Fecha de Respuesta)
+    const data = guestsList.map((guest) => ({
+      "Invitado / Familia": guest.name,
+      "Cupos Asignados (Pases)": guest.max_companions + 1,
+      "Estado Asistencia": guest.is_attending === null
+        ? "Pendiente"
+        : guest.is_attending
+        ? "Confirmado (Asistirá)"
+        : "Rechazado (No Asistirá)",
+      "Acompañantes Confirmados": guest.is_attending === true ? guest.confirmed_companions : 0,
+      "Total Asistentes": guest.is_attending === true ? guest.confirmed_companions + 1 : guest.is_attending === false ? 0 : 0
+    }));
+
+    // 2. Create worksheet from JSON
+    const worksheet = XLSX.utils.json_to_sheet(data);
+
+    // 3. Create workbook and append worksheet
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Invitados");
+
+    // 4. Generate buffer and download native xlsx file
+    XLSX.writeFile(workbook, `lista_invitados_boda_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   return (
-    <div className="w-full min-h-screen py-8 px-4 md:px-8 flex flex-col items-center justify-center bg-[#FAF6F0]">
-      {/* Container Frame */}
-      <div className="w-full max-w-2xl bg-white rounded-3xl shadow-xl border border-gold-300/20 p-6 md:p-10 flex flex-col gap-6">
-        
-        {/* Header */}
-        <div className="text-center">
-          <h2 className="font-serif text-gold-500 text-sm tracking-[0.3em] font-semibold uppercase mb-1">
+    <div className="w-full min-h-screen py-8 px-4 md:px-8 flex flex-col items-center justify-start bg-[#FAF6F0] gap-6">
+      
+      {/* 1. Header (Navbar back link) */}
+      <div className="w-full max-w-6xl flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white px-6 py-4 rounded-3xl shadow-sm border border-gold-200/20 gap-4">
+        <div>
+          <h1 className="font-serif text-[#3D3526] text-xl font-bold tracking-wider uppercase">
             Panel de Novios
-          </h2>
-          <h1 className="font-cursive text-gold-700 text-5xl md:text-6xl leading-none mt-1">
-            Generador de Enlaces
           </h1>
-          <div className="w-24 h-[1px] bg-gold-500 mx-auto my-3 opacity-60"></div>
-          <p className="font-sans text-xs text-[#7A7160] max-w-md mx-auto">
-            Crea links personalizados para tus invitados. Podrás asignar pases específicos para acompañantes y la invitación cargará automáticamente sus datos.
+          <p className="font-sans text-[11px] text-[#7A7160] mt-0.5">
+            Control de asistencia y generación de enlaces de invitación en tiempo real.
           </p>
         </div>
+        <div className="flex items-center gap-3 w-full sm:w-auto flex-wrap sm:flex-nowrap">
+          <button
+            onClick={downloadExcel}
+            className="w-full sm:w-auto text-center px-4 py-2 bg-white border border-green-600/30 hover:bg-green-50 text-green-700 rounded-xl text-xs font-serif font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+          >
+            <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-current">
+              <path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2v9.67z" />
+            </svg>
+            Descargar Excel
+          </button>
+          <Link
+            href="/"
+            className="w-full sm:w-auto text-center px-4 py-2 border border-gold-300/40 hover:bg-gold-50/50 text-gold-700 rounded-xl text-xs font-serif font-bold uppercase tracking-wider transition-colors"
+          >
+            ← Volver a la Invitación
+          </Link>
+        </div>
+      </div>
 
-        {/* Generator Form */}
-        <form onSubmit={handleGenerate} className="w-full flex flex-col gap-4 bg-[#FAF6F0] p-5 rounded-2xl border border-gold-300/10">
-          <div className="flex flex-col gap-1">
-            <label className="font-serif text-[11px] text-[#3D3526] uppercase font-bold tracking-wider">
-              Nombre del Invitado / Familia
+      {/* Error state card */}
+      {errorState && (
+        <div className="w-full max-w-6xl bg-yellow-50 border border-yellow-300 text-yellow-800 p-5 rounded-2xl flex flex-col gap-2.5 font-sans text-xs shadow-sm animate-fade-in-up">
+          <span className="font-bold uppercase tracking-wider text-yellow-900 flex items-center gap-1.5">
+            ⚠️ CONFIGURACIÓN DE SUPABASE REQUERIDA
+          </span>
+          <p>
+            No se pudo establecer conexión con tu base de datos de Supabase. Sigue estos pasos para configurarla localmente:
+          </p>
+          <ol className="list-decimal pl-5 flex flex-col gap-1.5 text-yellow-900 font-medium">
+            <li>Crea un archivo de texto llamado <strong>.env.local</strong> en la carpeta raíz del proyecto.</li>
+            <li>Copia y pega la estructura provista en <strong>.env.local.example</strong> en ese nuevo archivo.</li>
+            <li>Ingresa a tu cuenta de Supabase, copia el <strong>Project URL</strong> y el <strong>Anon Public Key</strong> (desde Settings ➔ API) y colócalos en el archivo.</li>
+            <li>Reinicia el servidor de desarrollo deteniendo la terminal actual con <code>Ctrl + C</code> y ejecutando nuevamente <code>npm run dev</code> o <code>pnpm dev</code>.</li>
+          </ol>
+        </div>
+      )}
+
+      {/* 2. Stats Grid */}
+      <div className="w-full max-w-6xl grid grid-cols-2 md:grid-cols-5 gap-3.5">
+        {/* Total Invites */}
+        <div className="bg-white rounded-2xl p-4 border border-gold-200/20 shadow-sm flex flex-col items-center justify-center text-center">
+          <span className="text-[9px] font-sans font-bold text-gray-400 uppercase tracking-widest">
+            Invitaciones
+          </span>
+          <span className="text-2xl font-serif font-bold text-[#3D3526] mt-1">
+            {totalInvitations}
+          </span>
+        </div>
+
+        {/* Confirmed Invites (Attending) */}
+        <div className="bg-white rounded-2xl p-4 border border-gold-200/20 shadow-sm flex flex-col items-center justify-center text-center">
+          <span className="text-[9px] font-sans font-bold text-green-600 uppercase tracking-widest">
+            Aceptaron (Sí)
+          </span>
+          <span className="text-2xl font-serif font-bold text-green-700 mt-1">
+            {totalAttending}
+          </span>
+        </div>
+
+        {/* Total People Attending */}
+        <div className="bg-white rounded-2xl p-4 border border-gold-400/40 shadow-sm flex flex-col items-center justify-center text-center col-span-2 md:col-span-1">
+          <span className="text-[9px] font-sans font-bold text-gold-700 uppercase tracking-widest">
+            Total Asistentes
+          </span>
+          <span className="text-2xl font-serif font-bold text-gold-700 mt-1">
+            {totalConfirmedPeople}
+          </span>
+        </div>
+
+        {/* Declined */}
+        <div className="bg-white rounded-2xl p-4 border border-gold-200/20 shadow-sm flex flex-col items-center justify-center text-center">
+          <span className="text-[9px] font-sans font-bold text-red-600 uppercase tracking-widest">
+            Rechazaron (No)
+          </span>
+          <span className="text-2xl font-serif font-bold text-red-700 mt-1">
+            {totalDeclined}
+          </span>
+        </div>
+
+        {/* Pending */}
+        <div className="bg-white rounded-2xl p-4 border border-gold-200/20 shadow-sm flex flex-col items-center justify-center text-center">
+          <span className="text-[9px] font-sans font-bold text-yellow-600 uppercase tracking-widest">
+            Pendientes
+          </span>
+          <span className="text-2xl font-serif font-bold text-yellow-700 mt-1">
+            {totalPending}
+          </span>
+        </div>
+      </div>
+
+      {/* 3. Horizontal Link Generator */}
+      <div className="w-full max-w-6xl bg-white p-5 md:p-6 rounded-3xl border border-gold-200/20 shadow-sm flex flex-col gap-4">
+        <h3 className="font-serif text-[#3D3526] text-xs font-bold tracking-widest uppercase">
+          Crear Nuevo Pase de Invitación
+        </h3>
+        
+        <form onSubmit={handleGenerate} className="flex flex-col md:flex-row gap-4 items-end w-full">
+          <div className="flex-1 flex flex-col gap-1.5 w-full">
+            <label className="font-serif text-[9px] text-[#7A7160] uppercase font-bold tracking-wider leading-none">
+              Invitado / Familia
             </label>
             <input
               type="text"
               required
               value={guestName}
               onChange={(e) => setGuestName(e.target.value)}
-              placeholder="Ej: Tía María y Familia, Juan Pérez, etc."
-              className="w-full px-4 py-2.5 border border-gold-300/40 rounded-xl text-sm font-sans bg-white focus:outline-none focus:border-gold-500 focus:ring-1 focus:ring-gold-500"
+              placeholder="Ej: Tía María y Familia"
+              className="w-full px-3.5 py-2 border border-gold-200/40 rounded-xl text-xs font-sans bg-[#FAF6F0]/40 focus:outline-none focus:border-gold-500 h-9"
             />
           </div>
 
-          <div className="flex flex-col gap-1">
-            <label className="font-serif text-[11px] text-[#3D3526] uppercase font-bold tracking-wider">
-              Límite de Acompañantes Adicionales
+          <div className="w-full md:w-64 flex flex-col gap-1.5">
+            <label className="font-serif text-[9px] text-[#7A7160] uppercase font-bold tracking-wider leading-none">
+              Límite de Acompañantes
             </label>
             <select
               value={companionLimit}
               onChange={(e) => setCompanionLimit(parseInt(e.target.value, 10))}
-              className="w-full px-4 py-2.5 border border-gold-300/40 rounded-xl text-sm font-sans bg-white focus:outline-none focus:border-gold-500 focus:ring-1 focus:ring-gold-500"
+              className="w-full px-3 py-2 border border-gold-200/40 rounded-xl text-xs font-sans bg-[#FAF6F0]/40 focus:outline-none focus:border-gold-500 cursor-pointer h-9 text-[#4E4739]"
             >
-              <option value="0">0 (Pase Individual - Solo el invitado principal)</option>
-              <option value="1">1 Acompañante (+ Invitado = 2 personas en total)</option>
-              <option value="2">2 Acompañantes (+ Invitado = 3 personas en total)</option>
-              <option value="3">3 Acompañantes (+ Invitado = 4 personas en total)</option>
-              <option value="4">4 Acompañantes (+ Invitado = 5 personas en total)</option>
-              <option value="5">5 Acompañantes (+ Invitado = 6 personas en total)</option>
-              <option value="6">6 Acompañantes (+ Invitado = 7 personas en total)</option>
-              <option value="7">7 Acompañantes (+ Invitado = 8 personas en total)</option>
-              <option value="8">8 Acompañantes (+ Invitado = 9 personas en total)</option>
-              <option value="9">9 Acompañantes (+ Invitado = 10 personas en total)</option>
-              <option value="10">10 Acompañantes (+ Invitado = 11 personas en total)</option>
+              <option value="0">Pase Individual (Sin acompañantes)</option>
+              {Array.from({ length: 10 }, (_, i) => (
+                <option key={i + 1} value={i + 1}>
+                  Permitir {i + 1} acompañante{i > 0 ? "s" : ""} adicional{i > 0 ? "es" : ""}
+                </option>
+              ))}
             </select>
           </div>
 
           <button
             type="submit"
-            className="w-full py-3 mt-2 bg-gradient-to-r from-gold-600 to-gold-500 text-white rounded-xl text-xs md:text-sm font-bold uppercase tracking-[0.15em] shadow-md hover:from-gold-700 hover:to-gold-600 transition-all duration-300 transform active:scale-[0.98]"
+            className="w-full md:w-52 bg-gradient-to-r from-gold-600 to-gold-500 text-white rounded-xl text-xs font-bold uppercase tracking-wider shadow hover:from-gold-700 hover:to-gold-600 transition-all duration-300 cursor-pointer h-9 flex items-center justify-center"
           >
-            Generar y Copiar Enlace
+            Generar Invitación
           </button>
         </form>
 
-        {/* Dynamic Success Alert */}
+        {/* Success Alert */}
         {justGenerated && (
-          <div className="w-full p-4 bg-green-50 border border-green-200 text-green-800 rounded-xl text-xs md:text-sm font-sans flex flex-col gap-1 transition-all animate-fade-in-up">
-            <span className="font-semibold flex items-center gap-1.5">
-              ✓ ¡Enlace copiado al portapapeles con éxito!
+          <div className="p-3 bg-green-50 border border-green-200 text-green-800 rounded-xl text-[11px] font-sans flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in-up">
+            <span className="font-semibold flex items-center gap-1">
+              ✓ ¡Enlace copiado al portapapeles!
             </span>
-            <span className="font-mono text-[10px] text-green-700 select-all overflow-x-auto whitespace-nowrap">
+            <span className="font-mono text-[9.5px] text-green-700 select-all overflow-x-auto whitespace-nowrap bg-white px-2.5 py-1 rounded border border-green-200 w-full sm:w-auto sm:flex-1 sm:text-right max-w-xl">
               {justGenerated}
             </span>
           </div>
         )}
-
-        {/* History Table */}
-        <div className="w-full flex flex-col gap-3">
-          <div className="flex justify-between items-center border-b border-gray-100 pb-2">
-            <h3 className="font-serif text-[#3D3526] text-xs font-bold tracking-[0.15em] uppercase">
-              Enlaces Generados ({history.length})
-            </h3>
-            {history.length > 0 && (
-              <button
-                onClick={handleClearHistory}
-                className="text-[10px] text-red-600 hover:text-red-700 font-bold uppercase tracking-wider transition-colors"
-              >
-                Limpiar Todo
-              </button>
-            )}
-          </div>
-
-          {history.length === 0 ? (
-            <div className="text-center py-6 text-xs font-sans text-gray-400">
-              Aún no has generado ningún enlace. Escribe los datos arriba para comenzar.
-            </div>
-          ) : (
-            <div className="max-h-[300px] overflow-y-auto pr-1 flex flex-col gap-2.5">
-              {history.map((item) => (
-                <div
-                  key={item.id}
-                  className="p-3.5 bg-white border border-gray-100 rounded-xl shadow-sm hover:border-gold-300/30 transition-all flex flex-col gap-1.5 relative group"
-                >
-                  <div className="flex justify-between items-start gap-4">
-                    <div>
-                      <h4 className="font-serif text-[#3D3526] text-sm font-bold leading-tight">
-                        {item.name}
-                      </h4>
-                      <p className="text-[10px] text-gold-700 font-semibold tracking-wider uppercase mt-0.5">
-                        Límite: {item.limit} acompañante(s) (máx: {item.limit + 1} personas)
-                      </p>
-                    </div>
-                    <span className="text-[9px] text-gray-400 font-mono self-start mt-0.5">
-                      {item.timestamp}
-                    </span>
-                  </div>
-
-                  <div className="flex gap-2 w-full mt-1.5 items-center justify-between">
-                    <span className="text-[10px] text-gray-400 font-mono truncate max-w-[70%] select-all">
-                      {item.url}
-                    </span>
-
-                    <div className="flex gap-2.5">
-                      <button
-                        onClick={() => handleCopy(item.url, item.id)}
-                        className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded transition-colors ${
-                          copiedId === item.id
-                            ? "bg-green-100 text-green-700"
-                            : "bg-gold-50 text-gold-700 hover:bg-gold-100"
-                        }`}
-                      >
-                        {copiedId === item.id ? "¡Copiado!" : "Copiar"}
-                      </button>
-
-                      <button
-                        onClick={() => handleDelete(item.id)}
-                        className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
-                      >
-                        Eliminar
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Back link */}
-        <div className="text-center pt-2 border-t border-gray-100">
-          <Link
-            href="/"
-            className="text-xs font-serif text-gold-600 hover:text-gold-700 font-semibold uppercase tracking-[0.25em]"
-          >
-            ← Volver a la Invitación
-          </Link>
-        </div>
-
       </div>
+
+      {/* 4. Table Section */}
+      <div className="w-full max-w-6xl bg-white rounded-3xl border border-gold-200/20 shadow-sm p-5 md:p-6 flex flex-col gap-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-gray-100 pb-4">
+          <div>
+            <h3 className="font-serif text-[#3D3526] text-sm font-bold tracking-wider uppercase">
+              Lista General de Invitados
+            </h3>
+            <p className="font-sans text-[10px] text-gray-400 mt-0.5">
+              Administración de respuestas y enlaces individuales.
+            </p>
+          </div>
+          
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Buscar por nombre..."
+            className="px-3 py-1.5 border border-gray-200 rounded-xl text-xs font-sans bg-gray-50 focus:outline-none focus:border-gold-500 w-full sm:max-w-[240px]"
+          />
+        </div>
+
+        {loading ? (
+          <div className="text-center py-12 text-xs font-sans text-gold-600 font-semibold uppercase tracking-widest animate-pulse">
+            Cargando lista desde Supabase...
+          </div>
+        ) : filteredGuests.length === 0 ? (
+          <div className="text-center py-12 text-xs font-sans text-gray-400">
+            {searchTerm ? "No se encontraron invitados con ese nombre." : "No hay invitaciones registradas en Supabase."}
+          </div>
+        ) : (
+          <>
+            {/* Desktop Table View (hidden on mobile) */}
+            <div className="hidden md:block overflow-x-auto w-full">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                <tr className="border-b border-gray-100 text-gray-400 font-serif uppercase tracking-wider text-[10px]">
+                  <th className="py-3 font-bold">Invitado</th>
+                  <th className="py-3 text-center font-bold">Pase Permitido</th>
+                  <th className="py-3 text-center font-bold">Respuesta</th>
+                  <th className="py-3 text-center font-bold">Acompañantes Confirmados</th>
+                  <th className="py-3 text-center font-bold">Total Asistentes</th>
+                  <th className="py-3 text-center font-bold">Confirmación</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {filteredGuests.map((guest) => {
+                  const guestLink = typeof window !== "undefined" ? `${window.location.origin}?id=${guest.id}` : "";
+                  
+                  return (
+                    <tr key={guest.id} className="hover:bg-[#FAF6F0]/25 transition-colors">
+                      <td className="py-3.5 pr-2">
+                        <div className="font-serif font-bold text-[#3D3526] text-sm">
+                          {guest.name}
+                        </div>
+                      </td>
+                      <td className="py-3.5 text-center text-gray-500 font-sans">
+                        {guest.max_companions === 0 ? "Individual" : `Individual + ${guest.max_companions} Acomp.`}
+                      </td>
+                      <td className="py-3.5 text-center">
+                        {guest.is_attending === null && (
+                          <span className="inline-block px-2.5 py-1 text-[10px] font-sans font-bold text-yellow-700 bg-yellow-50 border border-yellow-200/50 rounded-full">
+                            Pendiente
+                          </span>
+                        )}
+                        {guest.is_attending === true && (
+                          <span className="inline-block px-2.5 py-1 text-[10px] font-sans font-bold text-green-700 bg-green-50 border border-green-200/50 rounded-full">
+                            Asistirá
+                          </span>
+                        )}
+                        {guest.is_attending === false && (
+                          <span className="inline-block px-2.5 py-1 text-[10px] font-sans font-bold text-red-700 bg-red-50 border border-red-200/50 rounded-full">
+                            No Asistirá
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3.5 text-center text-gray-500 font-sans font-semibold">
+                        {guest.is_attending === true ? `${guest.confirmed_companions} acompañante(s)` : guest.is_attending === false ? 0 : "-"}
+                      </td>
+                      <td className="py-3.5 text-center text-[#3D3526] font-sans font-bold text-sm">
+                        {guest.is_attending === true ? guest.confirmed_companions + 1 : guest.is_attending === false ? 0 : "-"}
+                      </td>
+                      <td className="py-3.5 text-center text-gray-400 font-sans text-[10px]">
+                        {guest.confirmed_at ? new Date(guest.confirmed_at).toLocaleDateString("es-ES", {
+                          day: "numeric",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit"
+                        }) : "-"}
+                      </td>
+                        <td className="py-3.5 text-right">
+                          <div className="flex gap-2 justify-end">
+                            <button
+                              onClick={() => handleCopy(guestLink, guest.id)}
+                              className={`px-3 py-1.5 rounded-xl font-sans text-[10px] font-bold uppercase tracking-wider transition-all border ${
+                                copiedId === guest.id
+                                  ? "bg-green-50 border-green-300 text-green-700"
+                                  : "bg-[#FAF6F0] border-gold-300/30 text-gold-700 hover:bg-gold-50"
+                              }`}
+                            >
+                              {copiedId === guest.id ? "¡Copiado!" : "Copiar Enlace"}
+                            </button>
+                            <button
+                              onClick={() => triggerDeleteConfirm(guest.id, guest.name)}
+                              className="px-3 py-1.5 rounded-xl bg-red-50 border border-red-200/50 text-red-600 hover:bg-red-100 font-sans text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                            >
+                              Eliminar
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Card List View (hidden on desktop) */}
+            <div className="block md:hidden space-y-3.5 w-full">
+              {filteredGuests.map((guest) => {
+                const guestLink = typeof window !== "undefined" ? `${window.location.origin}?id=${guest.id}` : "";
+                
+                return (
+                  <div 
+                    key={guest.id} 
+                    className="bg-[#FAF6F0]/20 border border-gold-200/10 rounded-2xl p-4 flex flex-col gap-3 shadow-[0_2px_8px_-3px_rgba(0,0,0,0.05)]"
+                  >
+                    {/* Header: Name & Badge */}
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="font-serif font-bold text-[#3D3526] text-sm leading-snug">
+                        {guest.name}
+                      </div>
+                      <div>
+                        {guest.is_attending === null && (
+                          <span className="inline-block px-2 py-0.5 text-[9px] font-sans font-bold text-yellow-700 bg-yellow-50 border border-yellow-200/30 rounded-full">
+                            Pendiente
+                          </span>
+                        )}
+                        {guest.is_attending === true && (
+                          <span className="inline-block px-2.5 py-0.5 text-[9px] font-sans font-bold text-green-700 bg-green-50 border border-green-200/30 rounded-full">
+                            Confirmado
+                          </span>
+                        )}
+                        {guest.is_attending === false && (
+                          <span className="inline-block px-2.5 py-0.5 text-[9px] font-sans font-bold text-red-700 bg-red-50 border border-red-200/30 rounded-full">
+                            Rechazado
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Stats columns */}
+                    <div className="grid grid-cols-3 gap-2 border-y border-gray-100 py-2.5 text-center text-[10px] font-sans text-gray-500">
+                      <div>
+                        <span className="block text-[8px] uppercase tracking-wider text-gray-400 font-bold mb-0.5">Pase Asignado</span>
+                        <span className="text-[#3D3526] font-semibold">
+                          {guest.max_companions === 0 ? "Individual" : `+ ${guest.max_companions} Acomp.`}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="block text-[8px] uppercase tracking-wider text-gray-400 font-bold mb-0.5">Acompañantes</span>
+                        <span className="text-[#3D3526] font-semibold">
+                          {guest.is_attending === true ? guest.confirmed_companions : guest.is_attending === false ? 0 : "-"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="block text-[8px] uppercase tracking-wider text-gray-400 font-bold mb-0.5">Total Asistirán</span>
+                        <span className="text-gold-700 font-bold">
+                          {guest.is_attending === true ? guest.confirmed_companions + 1 : guest.is_attending === false ? 0 : "-"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Footer: Date & Actions */}
+                    <div className="flex items-center justify-between gap-3 mt-1">
+                      <span className="text-[9px] text-gray-400 font-sans">
+                        {guest.confirmed_at ? new Date(guest.confirmed_at).toLocaleDateString("es-ES", {
+                          day: "numeric",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit"
+                        }) : "Sin respuesta"}
+                      </span>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleCopy(guestLink, guest.id)}
+                          className={`px-2.5 py-1.5 rounded-xl font-sans text-[9px] font-bold uppercase tracking-wider transition-all border ${
+                            copiedId === guest.id
+                              ? "bg-green-50 border-green-300 text-green-700"
+                              : "bg-white border-gold-300/30 text-gold-700 hover:bg-gold-50"
+                          }`}
+                        >
+                          {copiedId === guest.id ? "¡Copiado!" : "Enlace"}
+                        </button>
+                        <button
+                          onClick={() => triggerDeleteConfirm(guest.id, guest.name)}
+                          className="px-2.5 py-1.5 rounded-xl bg-red-50 border border-red-200/50 text-red-600 hover:bg-red-100 font-sans text-[9px] font-bold uppercase tracking-wider transition-colors"
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Custom Deletion Alert Dialog */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-gold-200/10 flex flex-col gap-4 animate-scale-up">
+            <div className="flex gap-3 items-start">
+              <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center border border-red-100 text-red-600 flex-shrink-0">
+                <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current">
+                  <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h4 className="font-serif font-bold text-[#3D3526] text-sm uppercase tracking-wider text-left">
+                  ¿Eliminar invitado?
+                </h4>
+                <p className="font-sans text-xs text-gray-500 mt-1.5 leading-relaxed text-left">
+                  ¿Estás seguro de que deseas eliminar a <strong className="text-gray-700">{deleteConfirmName}</strong> de la lista de invitados? Esta acción no se puede deshacer y su enlace personalizado dejará de funcionar.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2.5 mt-2">
+              <button
+                onClick={() => {
+                  setDeleteConfirmId(null);
+                  setDeleteConfirmName("");
+                }}
+                className="px-4 py-2 border border-gray-200 text-gray-600 hover:bg-gray-50 rounded-xl text-xs font-sans font-bold uppercase tracking-wider transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={async () => {
+                  const id = deleteConfirmId;
+                  setDeleteConfirmId(null);
+                  setDeleteConfirmName("");
+                  try {
+                    const { error } = await supabase.from("guests").delete().eq("id", id);
+                    if (error) {
+                      console.error("Error deleting guest:", error);
+                      setCustomAlert({
+                        title: "Error al eliminar",
+                        message: "Hubo un problema al eliminar el registro de la base de datos."
+                      });
+                    } else {
+                      fetchGuests();
+                    }
+                  } catch (err) {
+                    console.error("Failed to delete guest:", err);
+                  }
+                }}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-sans font-bold uppercase tracking-wider transition-colors shadow-sm cursor-pointer"
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Alert Dialog */}
+      {customAlert && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-gold-200/10 flex flex-col gap-4 animate-scale-up">
+            <div className="flex gap-3 items-start">
+              <div className="w-10 h-10 rounded-full bg-gold-50 flex items-center justify-center border border-gold-100 text-gold-600 flex-shrink-0">
+                <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h4 className="font-serif font-bold text-[#3D3526] text-sm uppercase tracking-wider text-left">
+                  {customAlert.title || "Aviso"}
+                </h4>
+                <p className="font-sans text-xs text-gray-500 mt-1.5 leading-relaxed text-left">
+                  {customAlert.message}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end mt-2">
+              <button
+                onClick={() => setCustomAlert(null)}
+                className="px-4 py-2 bg-gold-600 hover:bg-gold-700 text-white rounded-xl text-xs font-sans font-bold uppercase tracking-wider transition-colors shadow-sm cursor-pointer"
+              >
+                Aceptar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
