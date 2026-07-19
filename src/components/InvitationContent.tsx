@@ -60,7 +60,7 @@ export default function InvitationContent() {
             <div className="md:col-span-5 flex justify-center w-full">
               <div className="relative w-full max-w-[260px] md:max-w-none aspect-[3/4] rounded-2xl overflow-hidden shadow-lg border-[6px] border-white group">
                 <img
-                  src="/images/imageprincipal.jpeg"
+                  src="/images/Imageprincipal.jpeg"
                   alt="José Andrés y Daviushka"
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
                 />
